@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Executivo & Gestão de Prazos</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Firebase App & Firestore SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              900: '#1e3a8a',
+            },
+            dark: {
+              bg: '#0b0f19',
+              card: '#111827',
+              border: '#1f2937',
+              hover: '#1f2937'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0b0f19;
+      color: #f3f4f6;
+    }
+    
+    .row-transition {
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .task-completed {
+      background-color: rgba(16, 185, 129, 0.04) !important;
+      opacity: 0.75;
+    }
+    .task-completed .task-title {
+      text-decoration: line-through;
+      color: #9ca3af;
+    }
+
+    .tab-btn.active {
+      background-color: #2563eb;
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-toast {
+      animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; color: black !important; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between">
+
+  <!-- NOTIFICAÇÕES (TOAST) CONTAINER -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- MODAL DE CONFIRMAÇÃO DE APAGAR -->
+  <div id="deleteModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-dark-card border border-dark-border rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl space-y-4">
+      <div class="flex items-center gap-3 text-red-400">
+        <div class="p-2 bg-red-500/10 rounded-lg">
+          <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+        </div>
+        <h3 class="font-bold text-base text-white">Remover Atividade</h3>
+      </div>
+      <p class="text-xs text-gray-400">Tem certeza de que deseja apagar esta atividade? Esta ação não pode ser desfeita.</p>
+      <div class="flex justify-end gap-3 pt-2">
+        <button onclick="closeDeleteModal()" class="px-4 py-2 rounded-lg text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 transition">Cancelar</button>
+        <button id="confirmDeleteBtn" class="px-4 py-2 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition">Sim, Apagar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP HEADER / NAV -->
+  <header class="bg-dark-card border-b border-dark-border py-4 px-6 sticky top-0 z-40 no-print">
+    <div class="max-w-[96%] mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+      
+      <div class="flex items-center gap-3">
+        <div class="p-2.5 bg-brand-600/20 text-brand-500 rounded-xl border border-brand-500/30">
+          <i data-lucide="check-square" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg text-white tracking-wide">Painel Executivo & Gestão de Prazos</h1>
+          <p class="text-xs text-gray-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Sincronizado em tempo real
+          </p>
+        </div>
+      </div>
+
+      <!-- Ações do Topo -->
+      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+        
+        <div class="flex items-center gap-2 bg-dark-bg border border-dark-border px-3 py-1.5 rounded-lg">
+          <i data-lucide="users" class="w-4 h-4 text-gray-400"></i>
+          <span class="text-xs text-gray-400 font-medium">Equipe:</span>
+          <input type="text" id="teamInput" value="Geral" class="bg-transparent text-sm text-white font-semibold focus:outline-none w-28" placeholder="Nome da Sala">
+        </div>
+
+        <button onclick="copyShareLink()" class="flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold transition shadow-sm">
+          <i data-lucide="link" class="w-4 h-4"></i>
+          Copiar Link da Equipe
+        </button>
+
+        <button onclick="exportCSV()" class="flex items-center gap-2 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 px-3 py-2 rounded-lg text-xs font-medium transition">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          Exportar CSV
+        </button>
+
+        <button onclick="window.print()" class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-dark-border px-3 py-2 rounded-lg text-xs font-medium transition">
+          <i data-lucide="printer" class="w-4 h-4"></i>
+          Imprimir / PDF
+        </button>
+
+      </div>
+
+    </div>
+  </header>
+
+  <!-- CONTAINER PRINCIPAL AMPLIADO -->
+  <main class="max-w-[96%] w-full mx-auto p-4 md:p-6 space-y-6 flex-grow">
+
+    <!-- CARDS DE MÉTRICAS CHAVE -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-gray-400 font-medium">Total de Registros</p>
+          <p id="statTotalCount" class="text-2xl font-bold text-white mt-1">0</p>
+        </div>
+        <div class="p-3 bg-gray-800/80 rounded-lg text-gray-400">
+          <i data-lucide="list-todo" class="w-5 h-5"></i>
+        </div>
+      </div>
+
+      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-gray-400 font-medium">Maior Prioridade (Pendente)</p>
+          <p id="statLeaderScore" class="text-2xl font-bold text-emerald-400 mt-1">Nível 0</p>
+        </div>
+        <div class="p-3 bg-emerald-500/10 rounded-lg text-emerald-400">
+          <i data-lucide="trending-up" class="w-5 h-5"></i>
+        </div>
+      </div>
+
+      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-gray-400 font-medium">Média de Prioridade</p>
+          <p id="statAvgScore" class="text-2xl font-bold text-brand-400 mt-1">0.0</p>
+        </div>
+        <div class="p-3 bg-brand-500/10 rounded-lg text-brand-400">
+          <i data-lucide="activity" class="w-5 h-5"></i>
+        </div>
+      </div>
+
+      <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-gray-400 font-medium">Em Atraso</p>
+          <p id="statLateCount" class="text-2xl font-bold text-red-400 mt-1">0</p>
+        </div>
+        <div class="p-3 bg-red-500/10 rounded-lg text-red-400">
+          <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- PÓDIO / DESTAQUES DA EQUIPE (TOP 3) -->
+    <div class="space-y-3">
+      <h2 class="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+        <i data-lucide="star" class="w-4 h-4"></i> Destaques de Prioridade da Equipe (Atrasados & Pendentes)
+      </h2>
+      <div id="podiumContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Renderizado via JS -->
+      </div>
+    </div>
+
+    <!-- FORMULÁRIO DE CADASTRO -->
+    <div class="bg-dark-card border border-dark-border rounded-xl p-5 shadow-lg no-print">
+      <h2 class="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+        <i data-lucide="plus-circle" class="w-4 h-4"></i> Registrar Atividade de Trabalho / Check List
+      </h2>
+      
+      <form id="activityForm" class="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+        <div class="md:col-span-3">
+          <label class="block text-xs text-gray-400 mb-1">Colaborador / Título</label>
+          <input type="text" id="nome" placeholder="Ex: Check List Quarta-feira" required
+            class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 transition">
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="block text-xs text-gray-400 mb-1">Prioridade (1 a 5)</label>
+          <input type="number" id="pontuacao" min="1" max="5" placeholder="Ex: 5 (Alta) a 1" required
+            class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 transition">
+        </div>
+
+        <div class="md:col-span-2">
+          <label class="block text-xs text-gray-400 mb-1">Data Estimada de Entrega</label>
+          <input type="date" id="dataEntrega" required
+            class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 transition">
+        </div>
+
+        <!-- REPETIÇÃO SEMANAL -->
+        <div class="md:col-span-2">
+          <label class="block text-xs text-gray-400 mb-1">Repetição</label>
+          <select id="repeatType" class="w-full bg-dark-bg border border-dark-border rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-brand-500 transition">
+            <option value="none">Não se repete</option>
+            <option value="weekly_wednesday">Semanalmente (Toda Quarta-feira)</option>
+            <option value="weekly_monday">Semanalmente (Toda Segunda-feira)</option>
+            <option value="weekly_custom">Semanalmente (Na mesma data)</option>
+            <option value="daily_workdays">Todos os dias (Segunda a Sexta)</option>
+          </select>
+        </div>
+
+        <!-- TEXTAREA PARA PERMITIR QUEBRA DE LINHAS NOS COMENTÁRIOS -->
+        <div class="md:col-span-3">
+          <label class="block text-xs text-gray-400 mb-1">Detalhes / Observação</label>
+          <textarea id="observacao" rows="2" placeholder="Ex: Verificar checklist semanal&#10;Pressione Enter para quebrar linha"
+            class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500 transition resize-y"></textarea>
+        </div>
+
+        <div class="md:col-span-12 flex justify-end gap-2 mt-2">
+          <button type="button" id="btnCancelEdit" onclick="cancelEditing()" class="hidden bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-2 px-4 rounded-lg text-sm transition">
+            Cancelar Edição
+          </button>
+          <button type="submit" id="btnSubmit" class="bg-brand-600 hover:bg-brand-700 text-white font-medium py-2 px-6 rounded-lg text-sm transition flex items-center justify-center gap-2 shadow-md">
+            <i data-lucide="check" class="w-4 h-4"></i> Salvar Registro
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- SELETOR DE ABAS -->
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-dark-border pb-3 no-print">
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="setTab('all')" id="tab-all" class="tab-btn active px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-dark-card border border-dark-border text-gray-300">
+          📋 Tabela Geral
+        </button>
+        <button onclick="setTab('weekly')" id="tab-weekly" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-dark-card border border-dark-border text-amber-400 flex items-center gap-1.5">
+          📅 Tarefas Semanais
+        </button>
+        <button onclick="setTab('todo')" id="tab-todo" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-dark-card border border-dark-border text-gray-300">
+          ⏳ A Fazer
+        </button>
+        <button onclick="setTab('progress')" id="tab-progress" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-dark-card border border-dark-border text-gray-300">
+          ⚡ Em Progresso
+        </button>
+        <button onclick="setTab('done')" id="tab-done" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-dark-card border border-dark-border text-gray-300">
+          ✅ Concluído
+        </button>
+        <button onclick="setTab('kanban')" id="tab-kanban" class="tab-btn px-3.5 py-1.5 rounded-lg text-xs font-semibold transition bg-dark-card border border-dark-border text-gray-300 flex items-center gap-1.5">
+          📊 Quadro Kanban
+        </button>
+      </div>
+
+      <!-- Pesquisa -->
+      <div class="relative w-full md:w-64">
+        <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-2.5"></i>
+        <input type="text" id="searchInput" oninput="render()" placeholder="Buscar colaborador ou detalhes..."
+          class="w-full bg-dark-bg border border-dark-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500 transition">
+      </div>
+    </div>
+
+    <!-- CONTAINER DA VISUALIZAÇÃO PRINCIPAL -->
+    <div id="mainViewContainer">
+      <!-- Gerado via JS -->
+    </div>
+
+  </main>
+
+  <!-- RODAPÉ -->
+  <footer class="text-center py-4 text-xs text-gray-500 border-t border-dark-border mt-8 no-print space-y-1">
+    <div>Painel Executivo & Gestão de Prazos &copy; Sincronização em Tempo Real</div>
+    <div class="text-[11px] text-gray-400 font-medium">Desenvolvido por <span class="text-brand-400 font-semibold">Nathan H.W moraes</span></div>
+  </footer>
+
+  <!-- SCRIPT JS -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDemoKeyForPublicDashboard001",
+      authDomain: "public-dashboard-demo.firebaseapp.com",
+      projectId: "public-dashboard-demo",
+      storageBucket: "public-dashboard-demo.appspot.com",
+      messagingSenderId: "1234567890",
+      appId: "1:1234567890:web:demo1234567890"
+    };
+
+    let useFirebase = false;
+    let db = null;
+    let atividades = [];
+    let editingIndex = null;
+    let currentTab = 'all';
+    let deleteTargetIndex = null;
+
+    try {
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      db = firebase.firestore();
+      useFirebase = true;
+    } catch (e) {
+      console.warn("Firestore offline. Usando salvamento local.");
+    }
+
+    const form = document.getElementById('activityForm');
+    const podiumContainer = document.getElementById('podiumContainer');
+    const teamInput = document.getElementById('teamInput');
+    const mainViewContainer = document.getElementById('mainViewContainer');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    document.getElementById('dataEntrega').value = todayStr;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('equipe') || urlParams.get('sala');
+    if (roomParam) teamInput.value = roomParam;
+
+    teamInput.addEventListener('change', () => loadData());
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      
+      const bgColor = type === 'success' ? 'bg-emerald-600/90 border-emerald-500/40 text-emerald-100' : 'bg-brand-600/90 border-brand-500/40 text-brand-100';
+      const iconName = type === 'success' ? 'check-circle' : 'info';
+
+      toast.className = `${bgColor} border backdrop-blur-md px-4 py-3 rounded-xl text-xs font-semibold shadow-2xl flex items-center gap-2.5 pointer-events-auto animate-toast`;
+      toast.innerHTML = `<i data-lucide="${iconName}" class="w-4 h-4"></i> ${message}`;
+      
+      container.appendChild(toast);
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 2500);
+    }
+
+    function loadData() {
+      const room = teamInput.value.trim().toLowerCase() || 'geral';
+
+      if (useFirebase) {
+        db.collection("equipes").doc(room).onSnapshot((doc) => {
+          if (doc.exists && doc.data().atividades) {
+            atividades = doc.data().atividades;
+          } else {
+            atividades = [];
+          }
+          render();
+        }, () => loadLocal(room));
+      } else {
+        loadLocal(room);
+      }
+    }
+
+    function loadLocal(room) {
+      atividades = JSON.parse(localStorage.getItem('atividades_' + room)) || [];
+      render();
+    }
+
+    function saveData() {
+      const room = teamInput.value.trim().toLowerCase() || 'geral';
+
+      if (useFirebase) {
+        db.collection("equipes").doc(room).set({
+          atividades: atividades,
+          updatedAt: new Date()
+        }).catch(() => {
+          localStorage.setItem('atividades_' + room, JSON.stringify(atividades));
+        });
+      } else {
+        localStorage.setItem('atividades_' + room, JSON.stringify(atividades));
+      }
+      render();
+    }
+
+    function setTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById(`tab-${tab}`);
+      if (activeBtn) activeBtn.classList.add('active');
+      render();
+    }
+
+    function toggleCompleted(index) {
+      const task = atividades[index];
+      const isNowCompleted = !task.completed;
+      task.completed = isNowCompleted;
+      task.status = isNowCompleted ? 'done' : 'todo';
+
+      showToast(isNowCompleted ? 'Atividade concluída!' : 'Atividade marcada como pendente.', 'info');
+      saveData();
+    }
+
+    function changeTaskStatus(index, newStatus) {
+      const task = atividades[index];
+      const wasCompleted = !!task.completed;
+      const isNowCompleted = (newStatus === 'done');
+
+      task.status = newStatus;
+      task.completed = isNowCompleted;
+
+      if (!wasCompleted && isNowCompleted && task.repeatType && task.repeatType !== 'none') {
+        const currentDate = new Date((task.dataEntrega || todayStr) + 'T00:00:00');
+        let nextDate = new Date(currentDate);
+
+        if (task.repeatType === 'weekly_wednesday' || task.repeatType === 'weekly_monday' || task.repeatType === 'weekly_custom') {
+          nextDate.setDate(nextDate.getDate() + 7);
+        } else if (task.repeatType === 'daily_workdays') {
+          nextDate.setDate(nextDate.getDate() + (nextDate.getDay() === 5 ? 3 : 1));
+        }
+
+        const nextDateStr = nextDate.toISOString().split('T')[0];
+
+        atividades.push({
+          nome: task.nome,
+          pontuacao: task.pontuacao,
+          dataEntrega: nextDateStr,
+          repeatType: task.repeatType,
+          observacao: task.observacao || '',
+          completed: false,
+          status: 'todo'
+        });
+
+        showToast('Atividade concluída e reagendada para a próxima semana!', 'success');
+      } else {
+        showToast('Status atualizado com sucesso.', 'info');
+      }
+
+      saveData();
+    }
+
+    function getWeekNumber(d) {
+      if (!d) return 'Sem data';
+      try {
+        const date = new Date(d + 'T00:00:00');
+        if (isNaN(date.getTime())) return 'Sem data';
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+        const week1 = new Date(date.getFullYear(), 0, 4);
+        const weekNum = 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+        return `Semana ${weekNum} (${date.getFullYear()})`;
+      } catch (e) {
+        return 'Sem data';
+      }
+    }
+
+    function isTaskLate(item) {
+      if (!item.dataEntrega) return false;
+      const due = new Date(item.dataEntrega + 'T00:00:00');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return due < today;
+    }
+
+    function getDueDateStatus(dataEntrega, isCompleted) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      let wasLate = false;
+      if (dataEntrega) {
+        const due = new Date(dataEntrega + 'T00:00:00');
+        due.setHours(0, 0, 0, 0);
+        wasLate = due < today;
+      }
+
+      if (isCompleted) {
+        if (wasLate) {
+          return { 
+            badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-red-500/40 bg-red-500/10 text-red-400 inline-block whitespace-nowrap">✓ Concluído (Com Atraso)</span>`, 
+            isLate: false 
+          };
+        }
+        return { 
+          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 inline-block whitespace-nowrap">✓ Concluído</span>`, 
+          isLate: false 
+        };
+      }
+      
+      if (!dataEntrega) {
+        return { 
+          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-gray-500/30 bg-gray-500/10 text-gray-400 inline-block whitespace-nowrap">Sem prazo</span>`, 
+          isLate: false 
+        };
+      }
+
+      const due = new Date(dataEntrega + 'T00:00:00');
+      due.setHours(0, 0, 0, 0);
+      const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+
+      if (diffDays < 0) {
+        return { 
+          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-red-500/40 bg-red-500/20 text-red-400 inline-block whitespace-nowrap">⚠️ Atrasado (${Math.abs(diffDays)}d)</span>`, 
+          isLate: true 
+        };
+      } else if (diffDays === 0) {
+        return { 
+          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-amber-500/40 bg-amber-500/20 text-amber-400 inline-block whitespace-nowrap">⏰ Entrega Hoje!</span>`, 
+          isLate: false 
+        };
+      } else {
+        return { 
+          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-brand-500/40 bg-brand-500/20 text-brand-300 inline-block whitespace-nowrap">⌛ Restam ${diffDays}d</span>`, 
+          isLate: false 
+        };
+      }
+    }
+
+    function sortTasksByUrgencyAndPriority(a, b) {
+      const aCompleted = !!a.completed;
+      const bCompleted = !!b.completed;
+
+      if (aCompleted !== bCompleted) {
+        return aCompleted ? 1 : -1;
+      }
+
+      const aLate = !aCompleted && isTaskLate(a);
+      const bLate = !bCompleted && isTaskLate(b);
+
+      if (aLate !== bLate) {
+        return aLate ? -1 : 1;
+      }
+
+      const prioA = parseFloat(a.pontuacao) || 1;
+      const prioB = parseFloat(b.pontuacao) || 1;
+
+      if (prioA !== prioB) {
+        return prioB - prioA;
+      }
+
+      const dateA = a.dataEntrega || '9999-99-99';
+      const dateB = b.dataEntrega || '9999-99-99';
+      return dateA.localeCompare(dateB);
+    }
+
+    function render() {
+      const searchInput = document.getElementById('searchInput');
+      const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+
+      updateStats();
+      renderPodium();
+
+      let filtered = atividades.filter(item => {
+        const matchSearch = (item.nome && item.nome.toLowerCase().includes(searchTerm)) || 
+                            (item.observacao && item.observacao.toLowerCase().includes(searchTerm));
+        if (!matchSearch) return false;
+
+        const isCompleted = !!item.completed;
+        const status = item.status || (isCompleted ? 'done' : 'todo');
+
+        if (currentTab === 'weekly') return item.repeatType && item.repeatType !== 'none';
+        if (currentTab === 'todo') return !isCompleted && status === 'todo';
+        if (currentTab === 'progress') return status === 'progress';
+        if (currentTab === 'done') return isCompleted || status === 'done';
+        return true;
+      });
+
+      filtered.sort(sortTasksByUrgencyAndPriority);
+
+      if (currentTab === 'kanban') {
+        renderKanban(filtered);
+      } else {
+        renderTable(filtered);
+      }
+
+      lucide.createIcons();
+    }
+
+    function renderTable(items) {
+      if (items.length === 0) {
+        mainViewContainer.innerHTML = `
+          <div class="bg-dark-card border border-dark-border rounded-xl p-8 text-center text-gray-500 text-xs flex flex-col items-center gap-2">
+            <i data-lucide="inbox" class="w-8 h-8 opacity-40"></i>
+            Nenhuma atividade registrada nesta aba.
+          </div>
+        `;
+        return;
+      }
+
+      let rowsHtml = items.map((item) => {
+        const realIndex = atividades.indexOf(item);
+        const isCompleted = !!item.completed;
+        const dueInfo = getDueDateStatus(item.dataEntrega, isCompleted);
+        const weekTag = getWeekNumber(item.dataEntrega);
+        const itemStatus = item.status || (isCompleted ? 'done' : 'todo');
+
+        return `
+          <tr class="row-transition hover:bg-dark-hover ${isCompleted ? 'task-completed' : ''}">
+            <td class="py-3.5 px-4 text-center">
+              <input type="checkbox" ${isCompleted ? 'checked' : ''} onchange="toggleCompleted(${realIndex})" 
+                class="w-4 h-4 text-brand-600 bg-dark-bg border-dark-border rounded focus:ring-brand-500 cursor-pointer transition">
+            </td>
+
+            <td class="py-3.5 px-4 font-semibold text-white task-title">
+              ${escapeHtml(item.nome || '')}
+              ${item.repeatType && item.repeatType !== 'none' ? `<span class="ml-2 text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded border border-amber-500/30 whitespace-nowrap">📅 Semanal</span>` : ''}
+            </td>
+
+            <td class="py-3.5 px-4 font-bold ${isCompleted ? 'text-gray-400' : 'text-emerald-400'}">
+              Prio ${item.pontuacao || 1}
+            </td>
+
+            <td class="py-3.5 px-4">
+              ${dueInfo.badgeHtml}
+            </td>
+
+            <!-- APLICAÇÃO DE WHITESPACE-NOWRAP NA SEMANA -->
+            <td class="py-3.5 px-4 text-xs font-medium text-gray-400">
+              <span class="bg-gray-800 border border-gray-700/60 text-gray-300 px-2.5 py-1 rounded-md text-xs inline-block whitespace-nowrap">
+                ${weekTag}
+              </span>
+            </td>
+
+            <!-- APLICAÇÃO DE WHITESPACE-PRE-LINE PARA PRESERVAR QUEBRAS DE LINHA -->
+            <td class="py-3.5 px-4 text-xs text-gray-400 whitespace-pre-line leading-relaxed max-w-md">
+              ${escapeHtml(item.observacao || '-')}
+            </td>
+
+            <td class="py-3.5 px-4">
+              <select onchange="changeTaskStatus(${realIndex}, this.value)" class="bg-dark-bg border border-dark-border rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-brand-500 transition cursor-pointer">
+                <option value="todo" ${itemStatus === 'todo' ? 'selected' : ''}>A Fazer</option>
+                <option value="progress" ${itemStatus === 'progress' ? 'selected' : ''}>Em Progresso</option>
+                <option value="done" ${itemStatus === 'done' ? 'selected' : ''}>Concluído</option>
+              </select>
+            </td>
+
+            <td class="py-3.5 px-4 text-right no-print">
+              <div class="flex items-center justify-end gap-1.5">
+                <button onclick="duplicateActivity(${realIndex})" title="Duplicar" class="p-1 hover:text-emerald-400 text-gray-400 transition rounded hover:bg-gray-800">
+                  <i data-lucide="copy" class="w-4 h-4"></i>
+                </button>
+                <button onclick="editActivity(${realIndex})" title="Editar" class="p-1 hover:text-brand-400 text-gray-400 transition rounded hover:bg-gray-800">
+                  <i data-lucide="edit-3" class="w-4 h-4"></i>
+                </button>
+                <button onclick="openDeleteModal(${realIndex})" title="Remover" class="p-1 hover:text-red-400 text-gray-400 transition rounded hover:bg-gray-800">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      mainViewContainer.innerHTML = `
+        <div class="bg-dark-card border border-dark-border rounded-xl overflow-hidden shadow-xl">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-gray-300">
+              <thead class="bg-dark-bg text-gray-400 uppercase text-[10px] tracking-wider border-b border-dark-border">
+                <tr>
+                  <th class="py-3 px-4 w-12 text-center">#</th>
+                  <th class="py-3 px-4">Colaborador / Título</th>
+                  <th class="py-3 px-4">Prioridade</th>
+                  <th class="py-3 px-4">Prazo / Alerta</th>
+                  <th class="py-3 px-4">Semana</th>
+                  <th class="py-3 px-4">Detalhes do Trabalho</th>
+                  <th class="py-3 px-4">Status</th>
+                  <th class="py-3 px-4 text-right no-print">Ações</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-dark-border">
+                ${rowsHtml}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderKanban(items) {
+      const todoItems = items.filter(i => !i.completed && (i.status === 'todo' || !i.status));
+      const progressItems = items.filter(i => i.status === 'progress');
+      const doneItems = items.filter(i => i.completed || i.status === 'done');
+
+      const renderKanbanCard = (item) => {
+        const realIndex = atividades.indexOf(item);
+        const dueInfo = getDueDateStatus(item.dataEntrega, item.completed);
+        const weekTag = getWeekNumber(item.dataEntrega);
+
+        return `
+          <div class="bg-dark-bg border border-dark-border rounded-xl p-3.5 space-y-2.5 shadow-sm hover:border-gray-700 transition relative">
+            <div class="flex justify-between items-start gap-2">
+              <h4 class="font-bold text-sm text-white ${item.completed ? 'line-through text-gray-400' : ''}">${escapeHtml(item.nome || '')}</h4>
+              <span class="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Prio ${item.pontuacao || 1}</span>
+            </div>
+
+            <p class="text-xs text-gray-400 leading-relaxed whitespace-pre-line">${escapeHtml(item.observacao || 'Sem observações')}</p>
+
+            ${dueInfo.isLate ? `<div class="bg-red-500/10 text-red-400 border border-red-500/20 p-2 rounded-lg text-[11px] font-bold flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-amber-400 fill-amber-400/20"></i> Atividade em atraso!</div>` : ''}
+
+            <div class="flex items-center justify-between pt-2 border-t border-dark-border/80 text-[11px]">
+              <div>${dueInfo.badgeHtml}</div>
+              <span class="text-[10px] text-gray-500 font-medium whitespace-nowrap">${weekTag}</span>
+            </div>
+
+            <div class="flex items-center justify-between pt-2">
+              <select onchange="changeTaskStatus(${realIndex}, this.value)" class="bg-dark-card border border-dark-border rounded px-2 py-1 text-[11px] text-gray-300 focus:outline-none">
+                <option value="todo" ${item.status === 'todo' || !item.status ? 'selected' : ''}>A Fazer</option>
+                <option value="progress" ${item.status === 'progress' ? 'selected' : ''}>Em Progresso</option>
+                <option value="done" ${item.status === 'done' || item.completed ? 'selected' : ''}>Concluído</option>
+              </select>
+
+              <div class="flex items-center gap-1">
+                <button onclick="editActivity(${realIndex})" title="Editar" class="p-1 text-gray-400 hover:text-brand-400 transition"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
+                <button onclick="openDeleteModal(${realIndex})" title="Remover" class="p-1 text-gray-400 hover:text-red-400 transition"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+              </div>
+            </div>
+          </div>
+        `;
+      };
+
+      mainViewContainer.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-dark-card border border-dark-border rounded-xl p-4 space-y-3">
+            <h3 class="font-bold text-xs uppercase tracking-wider text-amber-400 flex items-center justify-between pb-2 border-b border-dark-border">
+              <span>⏳ A Fazer</span>
+              <span class="bg-dark-bg px-2 py-0.5 rounded text-gray-400 font-semibold">${todoItems.length}</span>
+            </h3>
+            <div class="space-y-3">${todoItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 py-6 text-center">Nenhuma tarefa</p>'}</div>
+          </div>
+
+          <div class="bg-dark-card border border-dark-border rounded-xl p-4 space-y-3">
+            <h3 class="font-bold text-xs uppercase tracking-wider text-brand-400 flex items-center justify-between pb-2 border-b border-dark-border">
+              <span>⚡ Em Progresso</span>
+              <span class="bg-dark-bg px-2 py-0.5 rounded text-gray-400 font-semibold">${progressItems.length}</span>
+            </h3>
+            <div class="space-y-3">${progressItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 py-6 text-center">Nenhuma tarefa</p>'}</div>
+          </div>
+
+          <div class="bg-dark-card border border-dark-border rounded-xl p-4 space-y-3">
+            <h3 class="font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center justify-between pb-2 border-b border-dark-border">
+              <span>✅ Concluído</span>
+              <span class="bg-dark-bg px-2 py-0.5 rounded text-gray-400 font-semibold">${doneItems.length}</span>
+            </h3>
+            <div class="space-y-3">${doneItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 py-6 text-center">Nenhuma tarefa</p>'}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPodium() {
+      podiumContainer.innerHTML = '';
+      
+      const pendingTasks = atividades.filter(item => !item.completed);
+      const top3 = pendingTasks.sort(sortTasksByUrgencyAndPriority).slice(0, 3);
+
+      if (top3.length === 0) {
+        podiumContainer.innerHTML = `<div class="col-span-3 bg-dark-card border border-dark-border rounded-xl p-4 text-center text-xs text-gray-500">Nenhuma tarefa pendente no momento...</div>`;
+        return;
+      }
+
+      const styles = [
+        { title: '1º LUGAR (DESTAQUE)', border: 'border-amber-500/50', text: 'text-amber-400', badge: 'bg-amber-500 text-black' },
+        { title: '2º LUGAR', border: 'border-gray-400/30', text: 'text-gray-300', badge: 'bg-gray-400 text-black' },
+        { title: '3º LUGAR', border: 'border-amber-700/30', text: 'text-amber-500', badge: 'bg-amber-700 text-white' }
+      ];
+
+      top3.forEach((item, index) => {
+        const style = styles[index];
+        const card = document.createElement('div');
+        const isLate = isTaskLate(item);
+
+        card.className = `bg-dark-card border ${isLate ? 'border-red-500/60 bg-red-500/5' : style.border} rounded-xl p-4 relative overflow-hidden shadow-lg`;
+
+        card.innerHTML = `
+          <div class="flex justify-between items-start mb-2">
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded ${style.badge}">${style.title}</span>
+            <span class="text-xs ${isLate ? 'text-red-400 font-bold flex items-center gap-1.5' : 'text-gray-400'}">
+              ${isLate ? '<i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400 fill-amber-400/20"></i> ATRASADO' : (item.dataEntrega || 'Sem data')}
+            </span>
+          </div>
+          <h3 class="font-bold text-base text-white truncate">${escapeHtml(item.nome || '')}</h3>
+          <p class="text-xs text-gray-400 truncate mb-3 whitespace-pre-line">${escapeHtml(item.observacao || 'Sem observações')}</p>
+          <div class="flex justify-between items-end border-t border-dark-border pt-2">
+            <span class="text-[10px] text-gray-400">Nível de Prioridade</span>
+            <span class="text-lg font-bold ${isLate ? 'text-red-400' : style.text}">Prio ${item.pontuacao || 1}</span>
+          </div>
+        `;
+        podiumContainer.appendChild(card);
+      });
+    }
+
+    function updateStats() {
+      const total = atividades.length;
+      const pendingTasks = atividades.filter(i => !i.completed);
+      
+      const sum = pendingTasks.reduce((acc, curr) => acc + (parseFloat(curr.pontuacao) || 1), 0);
+      const avg = pendingTasks.length > 0 ? (sum / pendingTasks.length).toFixed(1) : '0.0';
+      const maxPrio = pendingTasks.length > 0 ? Math.max(...pendingTasks.map(i => parseFloat(i.pontuacao) || 1)) : 0;
+
+      const lateCount = atividades.filter(item => !item.completed && isTaskLate(item)).length;
+
+      document.getElementById('statTotalCount').innerText = total;
+      document.getElementById('statLeaderScore').innerText = pendingTasks.length > 0 ? 'Nível ' + maxPrio : 'Nível 0';
+      document.getElementById('statAvgScore').innerText = avg;
+      document.getElementById('statLateCount').innerText = lateCount;
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const nome = document.getElementById('nome').value.trim();
+      let pontuacao = parseInt(document.getElementById('pontuacao').value) || 1;
+      if (pontuacao < 1) pontuacao = 1;
+      if (pontuacao > 5) pontuacao = 5;
+
+      let dataEntrega = document.getElementById('dataEntrega').value;
+      if (!dataEntrega) dataEntrega = new Date().toISOString().split('T')[0];
+
+      const repeatType = document.getElementById('repeatType').value;
+      const observacao = document.getElementById('observacao').value.trim();
+
+      if (editingIndex !== null) {
+        atividades[editingIndex] = { 
+          ...atividades[editingIndex], 
+          nome, 
+          pontuacao, 
+          dataEntrega, 
+          repeatType, 
+          observacao 
+        };
+        editingIndex = null;
+        document.getElementById('btnSubmit').innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Salvar Registro`;
+        document.getElementById('btnCancelEdit').classList.add('hidden');
+        showToast('Atividade atualizada com sucesso!', 'success');
+      } else {
+        atividades.push({ 
+          nome, 
+          pontuacao, 
+          dataEntrega, 
+          repeatType, 
+          observacao, 
+          completed: false, 
+          status: 'todo' 
+        });
+        showToast('Nova atividade salva com sucesso!', 'success');
+      }
+
+      form.reset();
+      document.getElementById('dataEntrega').value = new Date().toISOString().split('T')[0];
+      
+      setTab('all');
+      saveData();
+    });
+
+    function editActivity(index) {
+      const item = atividades[index];
+      document.getElementById('nome').value = item.nome || '';
+      document.getElementById('pontuacao').value = item.pontuacao || 1;
+      document.getElementById('dataEntrega').value = item.dataEntrega || new Date().toISOString().split('T')[0];
+      document.getElementById('repeatType').value = item.repeatType || 'none';
+      document.getElementById('observacao').value = item.observacao || '';
+
+      editingIndex = index;
+      document.getElementById('btnSubmit').innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Atualizar`;
+      document.getElementById('btnCancelEdit').classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function cancelEditing() {
+      editingIndex = null;
+      form.reset();
+      document.getElementById('dataEntrega').value = new Date().toISOString().split('T')[0];
+      document.getElementById('btnSubmit').innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Salvar Registro`;
+      document.getElementById('btnCancelEdit').classList.add('hidden');
+    }
+
+    function duplicateActivity(index) {
+      const item = atividades[index];
+      const newItem = { ...item, completed: false, status: 'todo' };
+      atividades.push(newItem);
+      saveData();
+      showToast('Atividade duplicada com sucesso!', 'info');
+    }
+
+    function openDeleteModal(index) {
+      deleteTargetIndex = index;
+      document.getElementById('deleteModal').classList.remove('hidden');
+    }
+
+    function closeDeleteModal() {
+      deleteTargetIndex = null;
+      document.getElementById('deleteModal').classList.add('hidden');
+    }
+
+    document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
+      if (deleteTargetIndex !== null) {
+        atividades.splice(deleteTargetIndex, 1);
+        saveData();
+        closeDeleteModal();
+        showToast('Atividade removida.', 'info');
+      }
+    });
+
+    function copyShareLink() {
+      const room = teamInput.value.trim() || 'Geral';
+      const url = `${window.location.origin}${window.location.pathname}?equipe=${encodeURIComponent(room)}`;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast(`Link da equipe "${room}" copiado!`, 'success');
+      }).catch(() => {
+        prompt("Copie o link abaixo:", url);
+      });
+    }
+
+    function exportCSV() {
+      if (atividades.length === 0) return alert("Sem dados.");
+      let csv = "Status,Colaborador,Prioridade,DataEntrega,Repeticao,Observacao\n";
+      atividades.forEach((item) => {
+        const status = item.completed ? "Concluído" : "Pendente";
+        csv += `"${status}","${item.nome}",${item.pontuacao || 1},"${item.dataEntrega}","${item.repeatType || 'none'}","${item.observacao || ''}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `relatorio_${teamInput.value || 'equipe'}.csv`;
+      link.click();
+      showToast('Exportação concluída!', 'success');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.innerText = text;
+      return div.innerHTML;
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
