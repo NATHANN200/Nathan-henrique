@@ -10,9 +10,9 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   
-  <!-- Firebase App & Firestore SDKs -->
+  <!-- Firebase App & Realtime Database SDKs (Compat SDKs v10.7.1) -->
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 
   <script>
     tailwind.config = {
@@ -195,7 +195,7 @@
       </div>
     </div>
 
-    <!-- PÓDIO / DESTAQUES DA EQUIPE (TOP 3) -->
+    <!-- PÓDIO / DESTAQUES DA EQUIPE -->
     <div class="space-y-3">
       <h2 class="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
         <i data-lucide="star" class="w-4 h-4"></i> Destaques de Prioridade da Equipe (Atrasados & Pendentes)
@@ -230,7 +230,6 @@
             class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 transition">
         </div>
 
-        <!-- REPETIÇÃO SEMANAL -->
         <div class="md:col-span-2">
           <label class="block text-xs text-gray-400 mb-1">Repetição</label>
           <select id="repeatType" class="w-full bg-dark-bg border border-dark-border rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-brand-500 transition">
@@ -242,10 +241,9 @@
           </select>
         </div>
 
-        <!-- TEXTAREA PARA PERMITIR QUEBRA DE LINHAS NOS COMENTÁRIOS -->
         <div class="md:col-span-3">
           <label class="block text-xs text-gray-400 mb-1">Detalhes / Observação</label>
-          <textarea id="observacao" rows="2" placeholder="Ex: Verificar checklist semanal&#10;Pressione Enter para quebrar linha"
+          <textarea id="observacao" rows="2" placeholder="Ex: Verificar checklist semanal"
             class="w-full bg-dark-bg border border-dark-border rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500 transition resize-y"></textarea>
         </div>
 
@@ -292,9 +290,7 @@
     </div>
 
     <!-- CONTAINER DA VISUALIZAÇÃO PRINCIPAL -->
-    <div id="mainViewContainer">
-      <!-- Gerado via JS -->
-    </div>
+    <div id="mainViewContainer"></div>
 
   </main>
 
@@ -304,19 +300,21 @@
     <div class="text-[11px] text-gray-400 font-medium">Desenvolvido por <span class="text-brand-400 font-semibold">Nathan H.W moraes</span></div>
   </footer>
 
-  <!-- SCRIPT JS -->
+  <!-- SCRIPT JS PRINCIPAL -->
   <script>
+    // CREDENCIAIS DO FIREBASE REALTIME DATABASE (SUBSTITUA PELAS SUAS!)
     const firebaseConfig = {
-      apiKey: "AIzaSyDemoKeyForPublicDashboard001",
-      authDomain: "public-dashboard-demo.firebaseapp.com",
-      projectId: "public-dashboard-demo",
-      storageBucket: "public-dashboard-demo.appspot.com",
+      apiKey: "SUA_API_KEY_AQUI",
+      authDomain: "seu-projeto.firebaseapp.com",
+      databaseURL: "https://seu-projeto-default-rtdb.firebaseio.com",
+      projectId: "seu-projeto",
+      storageBucket: "seu-projeto.appspot.com",
       messagingSenderId: "1234567890",
-      appId: "1:1234567890:web:demo1234567890"
+      appId: "1:1234567890:web:abcdef123456"
     };
 
-    let useFirebase = false;
     let db = null;
+    let useFirebase = false;
     let atividades = [];
     let editingIndex = null;
     let currentTab = 'all';
@@ -326,10 +324,10 @@
       if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
       }
-      db = firebase.firestore();
+      db = firebase.database();
       useFirebase = true;
     } catch (e) {
-      console.warn("Firestore offline. Usando salvamento local.");
+      console.warn("Firebase offline/erro na chave. Usando salvamento local.", e);
     }
 
     const form = document.getElementById('activityForm');
@@ -345,6 +343,10 @@
     if (roomParam) teamInput.value = roomParam;
 
     teamInput.addEventListener('change', () => loadData());
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
 
     function showToast(message, type = 'success') {
       const container = document.getElementById('toastContainer');
@@ -367,17 +369,21 @@
     }
 
     function loadData() {
-      const room = teamInput.value.trim().toLowerCase() || 'geral';
+      const room = teamInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'geral';
 
-      if (useFirebase) {
-        db.collection("equipes").doc(room).onSnapshot((doc) => {
-          if (doc.exists && doc.data().atividades) {
-            atividades = doc.data().atividades;
+      if (useFirebase && db) {
+        db.ref('equipes/' + room).on('value', (snapshot) => {
+          const val = snapshot.val();
+          if (val && val.atividades) {
+            atividades = Array.isArray(val.atividades) ? val.atividades : Object.values(val.atividades);
           } else {
             atividades = [];
           }
           render();
-        }, () => loadLocal(room));
+        }, (error) => {
+          console.error("Erro Realtime DB:", error);
+          loadLocal(room);
+        });
       } else {
         loadLocal(room);
       }
@@ -389,19 +395,127 @@
     }
 
     function saveData() {
-      const room = teamInput.value.trim().toLowerCase() || 'geral';
+      const room = teamInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'geral';
 
-      if (useFirebase) {
-        db.collection("equipes").doc(room).set({
+      if (useFirebase && db) {
+        db.ref('equipes/' + room).set({
           atividades: atividades,
-          updatedAt: new Date()
-        }).catch(() => {
+          updatedAt: new Date().toISOString()
+        }).catch((err) => {
+          console.error("Erro ao salvar Firebase:", err);
           localStorage.setItem('atividades_' + room, JSON.stringify(atividades));
         });
       } else {
         localStorage.setItem('atividades_' + room, JSON.stringify(atividades));
       }
       render();
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+
+      const item = {
+        nome: document.getElementById('nome').value.trim(),
+        pontuacao: parseInt(document.getElementById('pontuacao').value) || 1,
+        dataEntrega: document.getElementById('dataEntrega').value,
+        repeatType: document.getElementById('repeatType').value,
+        observacao: document.getElementById('observacao').value.trim(),
+        completed: false,
+        status: 'todo'
+      };
+
+      if (editingIndex !== null) {
+        atividades[editingIndex] = { ...atividades[editingIndex], ...item };
+        editingIndex = null;
+        document.getElementById('btnCancelEdit').classList.add('hidden');
+        document.getElementById('btnSubmit').innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Salvar Registro`;
+        showToast('Atividade atualizada com sucesso!');
+      } else {
+        atividades.push(item);
+        showToast('Nova atividade criada!');
+      }
+
+      form.reset();
+      document.getElementById('dataEntrega').value = todayStr;
+      saveData();
+    });
+
+    function editActivity(index) {
+      const item = atividades[index];
+      if (!item) return;
+
+      editingIndex = index;
+      document.getElementById('nome').value = item.nome || '';
+      document.getElementById('pontuacao').value = item.pontuacao || 1;
+      document.getElementById('dataEntrega').value = item.dataEntrega || todayStr;
+      document.getElementById('repeatType').value = item.repeatType || 'none';
+      document.getElementById('observacao').value = item.observacao || '';
+
+      document.getElementById('btnCancelEdit').classList.remove('hidden');
+      document.getElementById('btnSubmit').innerHTML = `<i data-lucide="save" class="w-4 h-4"></i> Atualizar Registro`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function cancelEditing() {
+      editingIndex = null;
+      form.reset();
+      document.getElementById('dataEntrega').value = todayStr;
+      document.getElementById('btnCancelEdit').classList.add('hidden');
+      document.getElementById('btnSubmit').innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Salvar Registro`;
+    }
+
+    function duplicateActivity(index) {
+      const item = atividades[index];
+      if (!item) return;
+
+      const dup = { ...item, nome: item.nome + " (Cópia)", completed: false, status: 'todo' };
+      atividades.push(dup);
+      showToast('Atividade duplicada!');
+      saveData();
+    }
+
+    function openDeleteModal(index) {
+      deleteTargetIndex = index;
+      document.getElementById('deleteModal').classList.remove('hidden');
+    }
+
+    function closeDeleteModal() {
+      deleteTargetIndex = null;
+      document.getElementById('deleteModal').classList.add('hidden');
+    }
+
+    document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
+      if (deleteTargetIndex !== null && deleteTargetIndex >= 0 && deleteTargetIndex < atividades.length) {
+        atividades.splice(deleteTargetIndex, 1);
+        showToast('Atividade removida.', 'info');
+        saveData();
+      }
+      closeDeleteModal();
+    });
+
+    function copyShareLink() {
+      const room = teamInput.value.trim();
+      const url = `${window.location.origin}${window.location.pathname}?equipe=${encodeURIComponent(room)}`;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Link da equipe copiado para a área de transferência!');
+      });
+    }
+
+    function exportCSV() {
+      if (atividades.length === 0) {
+        showToast('Não há dados para exportar.', 'info');
+        return;
+      }
+      let csv = 'Nome/Colaborador,Prioridade,Prazo,Repeticao,Status,Observacao\n';
+      atividades.forEach(a => {
+        csv += `"${(a.nome || '').replace(/"/g, '""')}",${a.pontuacao || 1},"${a.dataEntrega || ''}","${a.repeatType || ''}","${a.status || 'todo'}","${(a.observacao || '').replace(/"/g, '""')}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `painel_atividades_${teamInput.value.trim()}.csv`);
+      link.click();
     }
 
     function setTab(tab) {
@@ -452,7 +566,7 @@
           status: 'todo'
         });
 
-        showToast('Atividade concluída e reagendada para a próxima semana!', 'success');
+        showToast('Atividade concluída e reagendada para o próximo ciclo!', 'success');
       } else {
         showToast('Status atualizado com sucesso.', 'info');
       }
@@ -496,22 +610,13 @@
 
       if (isCompleted) {
         if (wasLate) {
-          return { 
-            badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-red-500/40 bg-red-500/10 text-red-400 inline-block whitespace-nowrap">✓ Concluído (Com Atraso)</span>`, 
-            isLate: false 
-          };
+          return { badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-red-500/40 bg-red-500/10 text-red-400 inline-block whitespace-nowrap">✓ Concluído (Com Atraso)</span>`, isLate: false };
         }
-        return { 
-          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 inline-block whitespace-nowrap">✓ Concluído</span>`, 
-          isLate: false 
-        };
+        return { badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 inline-block whitespace-nowrap">✓ Concluído</span>`, isLate: false };
       }
       
       if (!dataEntrega) {
-        return { 
-          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-gray-500/30 bg-gray-500/10 text-gray-400 inline-block whitespace-nowrap">Sem prazo</span>`, 
-          isLate: false 
-        };
+        return { badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-gray-500/30 bg-gray-500/10 text-gray-400 inline-block whitespace-nowrap">Sem prazo</span>`, isLate: false };
       }
 
       const due = new Date(dataEntrega + 'T00:00:00');
@@ -519,20 +624,11 @@
       const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
 
       if (diffDays < 0) {
-        return { 
-          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-red-500/40 bg-red-500/20 text-red-400 inline-block whitespace-nowrap">⚠️ Atrasado (${Math.abs(diffDays)}d)</span>`, 
-          isLate: true 
-        };
+        return { badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-red-500/40 bg-red-500/20 text-red-400 inline-block whitespace-nowrap">⚠️ Atrasado (${Math.abs(diffDays)}d)</span>`, isLate: true };
       } else if (diffDays === 0) {
-        return { 
-          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-amber-500/40 bg-amber-500/20 text-amber-400 inline-block whitespace-nowrap">⏰ Entrega Hoje!</span>`, 
-          isLate: false 
-        };
+        return { badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-bold border border-amber-500/40 bg-amber-500/20 text-amber-400 inline-block whitespace-nowrap">⏰ Entrega Hoje!</span>`, isLate: false };
       } else {
-        return { 
-          badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-brand-500/40 bg-brand-500/20 text-brand-300 inline-block whitespace-nowrap">⌛ Restam ${diffDays}d</span>`, 
-          isLate: false 
-        };
+        return { badgeHtml: `<span class="px-2.5 py-1 rounded-md text-xs font-medium border border-brand-500/40 bg-brand-500/20 text-brand-300 inline-block whitespace-nowrap">⌛ Restam ${diffDays}d</span>`, isLate: false };
       }
     }
 
@@ -540,27 +636,80 @@
       const aCompleted = !!a.completed;
       const bCompleted = !!b.completed;
 
-      if (aCompleted !== bCompleted) {
-        return aCompleted ? 1 : -1;
-      }
+      if (aCompleted !== bCompleted) return aCompleted ? 1 : -1;
 
       const aLate = !aCompleted && isTaskLate(a);
       const bLate = !bCompleted && isTaskLate(b);
 
-      if (aLate !== bLate) {
-        return aLate ? -1 : 1;
-      }
+      if (aLate !== bLate) return aLate ? -1 : 1;
 
       const prioA = parseFloat(a.pontuacao) || 1;
       const prioB = parseFloat(b.pontuacao) || 1;
 
-      if (prioA !== prioB) {
-        return prioB - prioA;
-      }
+      if (prioA !== prioB) return prioB - prioA;
 
       const dateA = a.dataEntrega || '9999-99-99';
       const dateB = b.dataEntrega || '9999-99-99';
       return dateA.localeCompare(dateB);
+    }
+
+    function updateStats() {
+      const total = atividades.length;
+      const pending = atividades.filter(a => !a.completed);
+      const late = pending.filter(a => isTaskLate(a)).length;
+
+      let maxPrio = 0;
+      let sumPrio = 0;
+
+      atividades.forEach(a => {
+        const p = parseFloat(a.pontuacao) || 0;
+        sumPrio += p;
+        if (!a.completed && p > maxPrio) maxPrio = p;
+      });
+
+      const avg = total > 0 ? (sumPrio / total).toFixed(1) : '0.0';
+
+      document.getElementById('statTotalCount').innerText = total;
+      document.getElementById('statLeaderScore').innerText = `Nível ${maxPrio}`;
+      document.getElementById('statAvgScore').innerText = avg;
+      document.getElementById('statLateCount').innerText = late;
+    }
+
+    function renderPodium() {
+      const pendingAndLate = atividades
+        .filter(a => !a.completed)
+        .sort(sortTasksByUrgencyAndPriority)
+        .slice(0, 3);
+
+      if (pendingAndLate.length === 0) {
+        podiumContainer.innerHTML = `
+          <div class="col-span-3 bg-dark-card border border-dark-border rounded-xl p-4 text-center text-xs text-gray-500">
+            Nenhuma atividade pendente ou em atraso para destacar no momento.
+          </div>
+        `;
+        return;
+      }
+
+      podiumContainer.innerHTML = pendingAndLate.map((item, idx) => {
+        const dueInfo = getDueDateStatus(item.dataEntrega, item.completed);
+        return `
+          <div class="bg-dark-card border border-dark-border rounded-xl p-4 flex flex-col justify-between space-y-3 relative overflow-hidden">
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                #${idx + 1} Destaque
+              </span>
+              <span class="text-xs font-bold text-emerald-400">Prio ${item.pontuacao || 1}</span>
+            </div>
+            <div>
+              <h3 class="font-bold text-sm text-white">${escapeHtml(item.nome || '')}</h3>
+              <p class="text-xs text-gray-400 line-clamp-2 mt-1">${escapeHtml(item.observacao || 'Sem observações')}</p>
+            </div>
+            <div class="pt-2 border-t border-dark-border flex justify-between items-center text-xs">
+              ${dueInfo.badgeHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
     function render() {
@@ -634,14 +783,12 @@
               ${dueInfo.badgeHtml}
             </td>
 
-            <!-- APLICAÇÃO DE WHITESPACE-NOWRAP NA SEMANA -->
             <td class="py-3.5 px-4 text-xs font-medium text-gray-400">
               <span class="bg-gray-800 border border-gray-700/60 text-gray-300 px-2.5 py-1 rounded-md text-xs inline-block whitespace-nowrap">
                 ${weekTag}
               </span>
             </td>
 
-            <!-- APLICAÇÃO DE WHITESPACE-PRE-LINE PARA PRESERVAR QUEBRAS DE LINHA -->
             <td class="py-3.5 px-4 text-xs text-gray-400 whitespace-pre-line leading-relaxed max-w-md">
               ${escapeHtml(item.observacao || '-')}
             </td>
@@ -715,7 +862,7 @@
 
             <p class="text-xs text-gray-400 leading-relaxed whitespace-pre-line">${escapeHtml(item.observacao || 'Sem observações')}</p>
 
-            ${dueInfo.isLate ? `<div class="bg-red-500/10 text-red-400 border border-red-500/20 p-2 rounded-lg text-[11px] font-bold flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-amber-400 fill-amber-400/20"></i> Atividade em atraso!</div>` : ''}
+            ${dueInfo.isLate ? `<div class="bg-red-500/10 text-red-400 border border-red-500/20 p-2 rounded-lg text-[11px] font-bold flex items-center gap-1.5"><i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-amber-400 flex-shrink-0"></i> Atividade em atraso!</div>` : ''}
 
             <div class="flex items-center justify-between pt-2 border-t border-dark-border/80 text-[11px]">
               <div>${dueInfo.badgeHtml}</div>
@@ -726,12 +873,12 @@
               <select onchange="changeTaskStatus(${realIndex}, this.value)" class="bg-dark-card border border-dark-border rounded px-2 py-1 text-[11px] text-gray-300 focus:outline-none">
                 <option value="todo" ${item.status === 'todo' || !item.status ? 'selected' : ''}>A Fazer</option>
                 <option value="progress" ${item.status === 'progress' ? 'selected' : ''}>Em Progresso</option>
-                <option value="done" ${item.status === 'done' || item.completed ? 'selected' : ''}>Concluído</option>
+                <option value="done" ${item.status === 'done' ? 'selected' : ''}>Concluído</option>
               </select>
 
-              <div class="flex items-center gap-1">
-                <button onclick="editActivity(${realIndex})" title="Editar" class="p-1 text-gray-400 hover:text-brand-400 transition"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
-                <button onclick="openDeleteModal(${realIndex})" title="Remover" class="p-1 text-gray-400 hover:text-red-400 transition"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+              <div class="flex items-center gap-1 no-print">
+                <button onclick="editActivity(${realIndex})" title="Editar" class="p-1 hover:text-brand-400 text-gray-400 transition"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
+                <button onclick="openDeleteModal(${realIndex})" title="Remover" class="p-1 hover:text-red-400 text-gray-400 transition"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
               </div>
             </div>
           </div>
@@ -741,217 +888,30 @@
       mainViewContainer.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="bg-dark-card border border-dark-border rounded-xl p-4 space-y-3">
-            <h3 class="font-bold text-xs uppercase tracking-wider text-amber-400 flex items-center justify-between pb-2 border-b border-dark-border">
-              <span>⏳ A Fazer</span>
-              <span class="bg-dark-bg px-2 py-0.5 rounded text-gray-400 font-semibold">${todoItems.length}</span>
-            </h3>
-            <div class="space-y-3">${todoItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 py-6 text-center">Nenhuma tarefa</p>'}</div>
+            <div class="flex justify-between items-center pb-2 border-b border-dark-border">
+              <h3 class="font-bold text-xs uppercase tracking-wider text-gray-300 flex items-center gap-2">⏳ A Fazer (${todoItems.length})</h3>
+            </div>
+            <div class="space-y-3">${todoItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 text-center py-4">Nenhuma tarefa a fazer.</p>'}</div>
           </div>
 
           <div class="bg-dark-card border border-dark-border rounded-xl p-4 space-y-3">
-            <h3 class="font-bold text-xs uppercase tracking-wider text-brand-400 flex items-center justify-between pb-2 border-b border-dark-border">
-              <span>⚡ Em Progresso</span>
-              <span class="bg-dark-bg px-2 py-0.5 rounded text-gray-400 font-semibold">${progressItems.length}</span>
-            </h3>
-            <div class="space-y-3">${progressItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 py-6 text-center">Nenhuma tarefa</p>'}</div>
+            <div class="flex justify-between items-center pb-2 border-b border-dark-border">
+              <h3 class="font-bold text-xs uppercase tracking-wider text-brand-400 flex items-center gap-2">⚡ Em Progresso (${progressItems.length})</h3>
+            </div>
+            <div class="space-y-3">${progressItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 text-center py-4">Nenhuma tarefa em progresso.</p>'}</div>
           </div>
 
           <div class="bg-dark-card border border-dark-border rounded-xl p-4 space-y-3">
-            <h3 class="font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center justify-between pb-2 border-b border-dark-border">
-              <span>✅ Concluído</span>
-              <span class="bg-dark-bg px-2 py-0.5 rounded text-gray-400 font-semibold">${doneItems.length}</span>
-            </h3>
-            <div class="space-y-3">${doneItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 py-6 text-center">Nenhuma tarefa</p>'}</div>
+            <div class="flex justify-between items-center pb-2 border-b border-dark-border">
+              <h3 class="font-bold text-xs uppercase tracking-wider text-emerald-400 flex items-center gap-2">✅ Concluído (${doneItems.length})</h3>
+            </div>
+            <div class="space-y-3">${doneItems.map(renderKanbanCard).join('') || '<p class="text-xs text-gray-500 text-center py-4">Nenhuma tarefa concluída.</p>'}</div>
           </div>
         </div>
       `;
     }
 
-    function renderPodium() {
-      podiumContainer.innerHTML = '';
-      
-      const pendingTasks = atividades.filter(item => !item.completed);
-      const top3 = pendingTasks.sort(sortTasksByUrgencyAndPriority).slice(0, 3);
-
-      if (top3.length === 0) {
-        podiumContainer.innerHTML = `<div class="col-span-3 bg-dark-card border border-dark-border rounded-xl p-4 text-center text-xs text-gray-500">Nenhuma tarefa pendente no momento...</div>`;
-        return;
-      }
-
-      const styles = [
-        { title: '1º LUGAR (DESTAQUE)', border: 'border-amber-500/50', text: 'text-amber-400', badge: 'bg-amber-500 text-black' },
-        { title: '2º LUGAR', border: 'border-gray-400/30', text: 'text-gray-300', badge: 'bg-gray-400 text-black' },
-        { title: '3º LUGAR', border: 'border-amber-700/30', text: 'text-amber-500', badge: 'bg-amber-700 text-white' }
-      ];
-
-      top3.forEach((item, index) => {
-        const style = styles[index];
-        const card = document.createElement('div');
-        const isLate = isTaskLate(item);
-
-        card.className = `bg-dark-card border ${isLate ? 'border-red-500/60 bg-red-500/5' : style.border} rounded-xl p-4 relative overflow-hidden shadow-lg`;
-
-        card.innerHTML = `
-          <div class="flex justify-between items-start mb-2">
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded ${style.badge}">${style.title}</span>
-            <span class="text-xs ${isLate ? 'text-red-400 font-bold flex items-center gap-1.5' : 'text-gray-400'}">
-              ${isLate ? '<i data-lucide="alert-triangle" class="w-5 h-5 text-amber-400 fill-amber-400/20"></i> ATRASADO' : (item.dataEntrega || 'Sem data')}
-            </span>
-          </div>
-          <h3 class="font-bold text-base text-white truncate">${escapeHtml(item.nome || '')}</h3>
-          <p class="text-xs text-gray-400 truncate mb-3 whitespace-pre-line">${escapeHtml(item.observacao || 'Sem observações')}</p>
-          <div class="flex justify-between items-end border-t border-dark-border pt-2">
-            <span class="text-[10px] text-gray-400">Nível de Prioridade</span>
-            <span class="text-lg font-bold ${isLate ? 'text-red-400' : style.text}">Prio ${item.pontuacao || 1}</span>
-          </div>
-        `;
-        podiumContainer.appendChild(card);
-      });
-    }
-
-    function updateStats() {
-      const total = atividades.length;
-      const pendingTasks = atividades.filter(i => !i.completed);
-      
-      const sum = pendingTasks.reduce((acc, curr) => acc + (parseFloat(curr.pontuacao) || 1), 0);
-      const avg = pendingTasks.length > 0 ? (sum / pendingTasks.length).toFixed(1) : '0.0';
-      const maxPrio = pendingTasks.length > 0 ? Math.max(...pendingTasks.map(i => parseFloat(i.pontuacao) || 1)) : 0;
-
-      const lateCount = atividades.filter(item => !item.completed && isTaskLate(item)).length;
-
-      document.getElementById('statTotalCount').innerText = total;
-      document.getElementById('statLeaderScore').innerText = pendingTasks.length > 0 ? 'Nível ' + maxPrio : 'Nível 0';
-      document.getElementById('statAvgScore').innerText = avg;
-      document.getElementById('statLateCount').innerText = lateCount;
-    }
-
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-
-      const nome = document.getElementById('nome').value.trim();
-      let pontuacao = parseInt(document.getElementById('pontuacao').value) || 1;
-      if (pontuacao < 1) pontuacao = 1;
-      if (pontuacao > 5) pontuacao = 5;
-
-      let dataEntrega = document.getElementById('dataEntrega').value;
-      if (!dataEntrega) dataEntrega = new Date().toISOString().split('T')[0];
-
-      const repeatType = document.getElementById('repeatType').value;
-      const observacao = document.getElementById('observacao').value.trim();
-
-      if (editingIndex !== null) {
-        atividades[editingIndex] = { 
-          ...atividades[editingIndex], 
-          nome, 
-          pontuacao, 
-          dataEntrega, 
-          repeatType, 
-          observacao 
-        };
-        editingIndex = null;
-        document.getElementById('btnSubmit').innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Salvar Registro`;
-        document.getElementById('btnCancelEdit').classList.add('hidden');
-        showToast('Atividade atualizada com sucesso!', 'success');
-      } else {
-        atividades.push({ 
-          nome, 
-          pontuacao, 
-          dataEntrega, 
-          repeatType, 
-          observacao, 
-          completed: false, 
-          status: 'todo' 
-        });
-        showToast('Nova atividade salva com sucesso!', 'success');
-      }
-
-      form.reset();
-      document.getElementById('dataEntrega').value = new Date().toISOString().split('T')[0];
-      
-      setTab('all');
-      saveData();
-    });
-
-    function editActivity(index) {
-      const item = atividades[index];
-      document.getElementById('nome').value = item.nome || '';
-      document.getElementById('pontuacao').value = item.pontuacao || 1;
-      document.getElementById('dataEntrega').value = item.dataEntrega || new Date().toISOString().split('T')[0];
-      document.getElementById('repeatType').value = item.repeatType || 'none';
-      document.getElementById('observacao').value = item.observacao || '';
-
-      editingIndex = index;
-      document.getElementById('btnSubmit').innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4"></i> Atualizar`;
-      document.getElementById('btnCancelEdit').classList.remove('hidden');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function cancelEditing() {
-      editingIndex = null;
-      form.reset();
-      document.getElementById('dataEntrega').value = new Date().toISOString().split('T')[0];
-      document.getElementById('btnSubmit').innerHTML = `<i data-lucide="check" class="w-4 h-4"></i> Salvar Registro`;
-      document.getElementById('btnCancelEdit').classList.add('hidden');
-    }
-
-    function duplicateActivity(index) {
-      const item = atividades[index];
-      const newItem = { ...item, completed: false, status: 'todo' };
-      atividades.push(newItem);
-      saveData();
-      showToast('Atividade duplicada com sucesso!', 'info');
-    }
-
-    function openDeleteModal(index) {
-      deleteTargetIndex = index;
-      document.getElementById('deleteModal').classList.remove('hidden');
-    }
-
-    function closeDeleteModal() {
-      deleteTargetIndex = null;
-      document.getElementById('deleteModal').classList.add('hidden');
-    }
-
-    document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
-      if (deleteTargetIndex !== null) {
-        atividades.splice(deleteTargetIndex, 1);
-        saveData();
-        closeDeleteModal();
-        showToast('Atividade removida.', 'info');
-      }
-    });
-
-    function copyShareLink() {
-      const room = teamInput.value.trim() || 'Geral';
-      const url = `${window.location.origin}${window.location.pathname}?equipe=${encodeURIComponent(room)}`;
-      navigator.clipboard.writeText(url).then(() => {
-        showToast(`Link da equipe "${room}" copiado!`, 'success');
-      }).catch(() => {
-        prompt("Copie o link abaixo:", url);
-      });
-    }
-
-    function exportCSV() {
-      if (atividades.length === 0) return alert("Sem dados.");
-      let csv = "Status,Colaborador,Prioridade,DataEntrega,Repeticao,Observacao\n";
-      atividades.forEach((item) => {
-        const status = item.completed ? "Concluído" : "Pendente";
-        csv += `"${status}","${item.nome}",${item.pontuacao || 1},"${item.dataEntrega}","${item.repeatType || 'none'}","${item.observacao || ''}"\n`;
-      });
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `relatorio_${teamInput.value || 'equipe'}.csv`;
-      link.click();
-      showToast('Exportação concluída!', 'success');
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.innerText = text;
-      return div.innerHTML;
-    }
-
+    // Inicialização
     loadData();
   </script>
 </body>
